@@ -1,5 +1,5 @@
 // Cache-first service worker so the trainer works offline once installed.
-const CACHE = "clapping-v3";
+const CACHE = "clapping-v4";
 const CORE = ["./", "index.html", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {

@@ -101,6 +101,8 @@ h1 { font: 800 1.9rem/1 var(--display); margin: 0; letter-spacing: -0.02em; text
 .pad.beat { box-shadow: inset 0 0 0 8px var(--ink); }
 .pad.flash { background: var(--ink); color: var(--bg); }
 .tip { display: flex; gap: 10px; align-items: center; justify-content: space-between; background: var(--surface); border: 1px solid var(--p2); border-radius: 12px; padding: 10px 12px; font-size: 0.9rem; }
+.tip.done { border-color: var(--line); color: var(--muted); padding-block: 6px; }
+.tip.done button { background: transparent; color: var(--ink); border: 2px solid var(--line); }
 .tip button { font: 700 0.9rem var(--body); padding: 8px 12px; border-radius: 10px; border: 0; background: var(--p2); color: var(--on-p2); cursor: pointer; flex: none; }
 .pad .fb { position: absolute; top: 14px; left: 0; right: 0; text-align: center; font: 500 1rem var(--mono); opacity: 0.95; }
 .pad .hint { font: 400 0.9rem var(--body); letter-spacing: 0; opacity: 0.9; display: block; margin: 6px auto 0; max-width: 22rem; padding-inline: 12px; }
@@ -175,7 +177,7 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
     <span><span id="padMain">TAPEZ ICI</span><span class="hint" id="padHint">ou barre d'espace · appuyez sur Démarrer</span></span>
   </button>
 
-  <div class="tip" id="calTip" hidden><span>Sur téléphone, le son sort avec un peu de retard. Calibrez une fois pour que vos frappes soient bien comptées.</span><button type="button" id="calTipBtn">Calibrer</button></div>
+  <div class="tip" id="calTip"><span id="calTipTxt">Sur téléphone, le son sort avec un peu de retard. Calibrez une fois pour que vos frappes soient bien comptées.</span><button type="button" id="calTipBtn">Calibrer</button></div>
 
   <div class="controls">
     <button class="main" id="startBtn" type="button">Démarrer</button>
@@ -262,7 +264,11 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
     startSel.value = S.start;
     $("loop").checked = S.loop; $("countIn").checked = S.countIn;
     $("latency").value = S.latency; $("latOut").textContent = latLabel();
-    $("calTip").hidden = S.calibrated;
+    $("calTip").classList.toggle("done", S.calibrated);
+    $("calTipTxt").textContent = S.calibrated
+      ? "Délai compensé : " + Math.round(totalLat() * 1000) + "\u00a0ms"
+      : "Sur téléphone, le son sort avec un peu de retard. Calibrez une fois pour que vos frappes soient bien comptées.";
+    $("calTipBtn").textContent = S.calibrated ? "Recalibrer" : "Calibrer";
     document.documentElement.style.setProperty("--accent-mine", S.part === 1 ? "var(--p1)" : "var(--p2)");
     document.documentElement.style.setProperty("--on-mine", S.part === 1 ? "var(--on-p1)" : "var(--on-p2)");
     $("row1").classList.toggle("mine", S.part === 1);
@@ -324,7 +330,7 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
     var d = noise.getChannelData(0);
     for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     // outputLatency is only known once the device is actually playing.
-    setTimeout(function () { $("latOut").textContent = latLabel(); }, 600);
+    setTimeout(applyToForm, 600);
   }
   function clap(t, freq, pan, vol) {
     if (vol <= 0) return;
