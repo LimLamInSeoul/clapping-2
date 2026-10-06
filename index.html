@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Clapping Trainer</title>
+<meta name="description" content="Entraînement à Clapping Music de Steve Reich : jouez une partie pendant que l'autre défile, avec score de précision.">
+<meta name="theme-color" content="#0f1620">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: one phone-width column — score up top, a huge tap pad in the middle, settings and results folded below. */
+:root {
+  --bg: #e9edf2;
+  --surface: #ffffff;
+  --ink: #15202c;
+  --muted: #5a6878;
+  --line: #cfd7e0;
+  --p1: #2d4f86;
+  --p2: #d9820f;
+  --good: #23855a;
+  --ok: #b98a12;
+  --bad: #c2433a;
+  --on-p1: #ffffff;
+  --on-p2: #15202c;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1620; --surface: #18222e; --ink: #e6ebf1; --muted: #8e9bab; --line: #2a3745;
+    --p1: #86a8e0; --p2: #f2a63a; --good: #4cc38a; --ok: #e3b941; --bad: #f0675c; --on-p1: #10161e; --on-p2: #10161e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1620; --surface: #18222e; --ink: #e6ebf1; --muted: #8e9bab; --line: #2a3745;
+  --p1: #86a8e0; --p2: #f2a63a; --good: #4cc38a; --ok: #e3b941; --bad: #f0675c; --on-p1: #10161e; --on-p2: #10161e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 16px/1.45 var(--body);
+  -webkit-tap-highlight-color: transparent;
+}
+.wrap {
+  max-width: 34rem; margin: 0 auto;
+  padding-inline: 16px; padding-block: 14px 40px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+header { display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; }
+h1 { font: 800 1.9rem/1 var(--display); margin: 0; letter-spacing: -0.02em; text-wrap: balance; }
+.byline { color: var(--muted); font-size: 0.85rem; margin: 4px 0 0; }
+.where { font: 500 0.85rem/1.3 var(--mono); text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.where b { color: var(--ink); font-weight: 500; }
+
+.score { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: grid; gap: 8px; }
+.row { display: grid; grid-template-columns: 4.4rem 1fr; align-items: center; gap: 8px; }
+.row .lab { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); line-height: 1.1; }
+.row .lab b { display: block; color: var(--ink); letter-spacing: 0.02em; }
+.cells { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; }
+.cells span {
+  aspect-ratio: 1; max-width: 100%; border-radius: 50%;
+  border: 2px solid var(--line); position: relative;
+  transition: transform 60ms ease-out;
+}
+.cells span.on { border-color: transparent; }
+.r1 .cells span.on { background: var(--p1); }
+.r2 .cells span.on { background: var(--p2); }
+.cells span.now { transform: scale(1.22); box-shadow: 0 0 0 2px var(--ink); }
+.cells span.hit-good::after, .cells span.hit-ok::after, .cells span.miss::after {
+  content: ""; position: absolute; left: 50%; top: 115%; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%;
+}
+.cells span.hit-good::after { background: var(--good); }
+.cells span.hit-ok::after { background: var(--ok); }
+.cells span.miss::after { background: var(--bad); border-radius: 1px; }
+.mine .lab b::after { content: "vous"; margin-left: 4px; padding: 0 4px; border-radius: 4px; background: var(--ink); color: var(--bg); font-size: 0.65rem; vertical-align: 1px; }
+.sections { display: grid; grid-template-columns: repeat(13, 1fr); gap: 3px; margin-top: 10px; }
+.sections i { height: 5px; border-radius: 3px; background: var(--line); }
+.sections i.done { background: var(--muted); }
+.sections i.cur { background: var(--ink); }
+.shift-warn { font: 500 0.8rem var(--mono); color: var(--p2); min-height: 1.2em; text-align: center; }
+
+.pad {
+  position: relative; user-select: none; -webkit-user-select: none; touch-action: none;
+  height: min(42vh, 20rem); border-radius: 22px; border: 0; width: 100%;
+  background: var(--accent-mine, var(--p2)); color: var(--on-mine, var(--on-p2));
+  font: 800 1.6rem var(--display); letter-spacing: 0.04em; cursor: pointer;
+  display: grid; place-items: center; overflow: hidden;
+  box-shadow: inset 0 -6px 0 rgba(0,0,0,0.12);
+}
+.pad:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+.pad.flash { filter: brightness(1.25); transform: scale(0.99); }
+.pad .fb { position: absolute; top: 14px; left: 0; right: 0; text-align: center; font: 500 1rem var(--mono); opacity: 0.95; }
+.pad .hint { font: 400 0.85rem var(--body); letter-spacing: 0; opacity: 0.85; display: block; margin-top: 6px; }
+
+.controls { display: flex; gap: 10px; }
+button.main, button.sec {
+  font: 700 1rem var(--body); border-radius: 12px; padding: 14px 16px; cursor: pointer; border: 2px solid var(--ink);
+}
+button.main { flex: 1; background: var(--ink); color: var(--bg); }
+button.sec { background: transparent; color: var(--ink); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid var(--p2); outline-offset: 2px; }
+
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px; min-width: 0; }
+.stat small { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.stat strong { font: 500 1.3rem var(--mono); font-variant-numeric: tabular-nums; }
+.stat em { display: block; font-style: normal; font-size: 0.75rem; color: var(--muted); }
+
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+summary { padding: 14px; font-weight: 700; cursor: pointer; }
+.panel { padding: 0 14px 16px; display: grid; gap: 14px; }
+.field { display: grid; gap: 6px; }
+.field > span { font-size: 0.85rem; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.field > span output { font: 500 0.85rem var(--mono); color: var(--ink); }
+input[type=range] { width: 100%; accent-color: var(--p2); }
+select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 100%; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg label { flex: 1; text-align: center; cursor: pointer; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label span { display: block; padding: 9px 4px; font-size: 0.9rem; }
+.seg input:checked + span { background: var(--ink); color: var(--bg); font-weight: 700; }
+.seg input:focus-visible + span { outline: 3px solid var(--p2); outline-offset: -3px; }
+.check { display: flex; gap: 10px; align-items: center; font-size: 0.95rem; }
+.check input { width: 20px; height: 20px; accent-color: var(--p2); }
+.cal { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.cal button { font: 700 0.9rem var(--body); padding: 9px 12px; border-radius: 10px; border: 2px solid var(--ink); background: transparent; color: var(--ink); cursor: pointer; }
+.note { font-size: 0.85rem; color: var(--muted); margin: 0; }
+
+.results { padding: 0 14px 16px; }
+.bars { display: grid; grid-template-columns: repeat(13, 1fr); gap: 4px; align-items: end; height: 110px; border-bottom: 1px solid var(--line); }
+.bars div { background: var(--p2); border-radius: 3px 3px 0 0; min-height: 2px; position: relative; }
+.bars div.empty { background: var(--line); }
+.bars div.low { background: var(--bad); }
+.bars div.mid { background: var(--ok); }
+.bars div.high { background: var(--good); }
+.barlabels { display: grid; grid-template-columns: repeat(13, 1fr); gap: 4px; font: 500 0.7rem var(--mono); color: var(--muted); text-align: center; margin-top: 4px; }
+.summary { margin: 10px 0 0; }
+.howto { font-size: 0.92rem; }
+.howto p { margin: 0 0 8px; }
+@media (prefers-reduced-motion: reduce) { .cells span { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Clapping Music</h1>
+      <p class="byline">Steve Reich, 1972 · pour deux paires de mains</p>
+    </div>
+    <div class="where" id="where">Section <b id="secNum">1</b>/13<br>rép. <b id="repNum">–</b>/<span id="repTot">8</span></div>
+  </header>
+
+  <section class="score" aria-label="Partition">
+    <div class="row r1" id="row1"><div class="lab"><b>Partie 1</b>fixe</div><div class="cells" id="cells1"></div></div>
+    <div class="row r2" id="row2"><div class="lab"><b>Partie 2</b>décalée</div><div class="cells" id="cells2"></div></div>
+    <div class="sections" id="sections" aria-hidden="true"></div>
+  </section>
+  <div class="shift-warn" id="shiftWarn" aria-live="polite"></div>
+
+  <button class="pad" id="pad" type="button" aria-label="Taper le rythme">
+    <span class="fb" id="fb"></span>
+    <span>TAPEZ ICI<span class="hint" id="padHint">ou barre d'espace · appuyez sur Démarrer</span></span>
+  </button>
+
+  <div class="controls">
+    <button class="main" id="startBtn" type="button">Démarrer</button>
+    <button class="sec" id="listenBtn" type="button">Écouter</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><small>Précision</small><strong id="stAcc">–</strong><em id="stCount">0 frappe</em></div>
+    <div class="stat"><small>Écart moyen</small><strong id="stErr">–</strong><em id="stErrTxt">avance / retard</em></div>
+    <div class="stat"><small>Régularité</small><strong id="stAbs">–</strong><em>écart absolu</em></div>
+  </div>
+
+  <details id="resultsBox" hidden>
+    <summary>Résultats par section</summary>
+    <div class="results">
+      <div class="bars" id="bars"></div>
+      <div class="barlabels" id="barlabels"></div>
+      <p class="summary" id="summary"></p>
+    </div>
+  </details>
+
+  <details id="settingsBox" open>
+    <summary>Réglages</summary>
+    <div class="panel">
+      <label class="field"><span>Tempo (noire) <output id="tempoOut">120</output></span>
+        <input type="range" id="tempo" min="60" max="200" step="2" value="120"></label>
+      <div class="field"><span>Ma partie</span>
+        <div class="seg" role="radiogroup">
+          <label><input type="radio" name="part" id="part2" value="2" checked><span>Partie 2 · décalée</span></label>
+          <label><input type="radio" name="part" id="part1" value="1"><span>Partie 1 · fixe</span></label>
+        </div></div>
+      <div class="field"><span>Ma partie jouée par l'appli</span>
+        <div class="seg" role="radiogroup">
+          <label><input type="radio" name="mine" id="mineNormal" value="normal"><span>Fort</span></label>
+          <label><input type="radio" name="mine" id="mineSoft" value="soft" checked><span>Doux</span></label>
+          <label><input type="radio" name="mine" id="mineMute" value="mute"><span>Muet</span></label>
+        </div></div>
+      <label class="field"><span>Répétitions par section</span>
+        <select id="reps"><option>4</option><option>6</option><option selected>8</option><option>12</option></select></label>
+      <label class="field"><span>Commencer à la section</span>
+        <select id="startSec"></select></label>
+      <label class="check"><input type="checkbox" id="loop"> Boucler sur cette section</label>
+      <label class="check"><input type="checkbox" id="countIn" checked> Décompte d'une mesure</label>
+      <div class="field"><span>Compensation de latence <output id="latOut">0 ms</output></span>
+        <input type="range" id="latency" min="0" max="400" step="5" value="0">
+        <div class="cal"><button type="button" id="calBtn">Calibrer</button><span class="note" id="calTxt">Tapez sur 12 clics pour mesurer le délai audio (utile en Bluetooth).</span></div>
+      </div>
+    </div>
+  </details>
+
+  <details>
+    <summary>Comment s'entraîner</summary>
+    <div class="panel howto">
+      <p>Le motif tient en 12 croches : trois frappes, silence, deux, silence, une, silence, deux, silence. La partie 1 le répète sans changer. La partie 2 avance d'une croche à chaque nouvelle section, jusqu'à retomber à l'unisson à la section 13.</p>
+      <p>Commencez lentement (90 à la noire), partie « Fort », en bouclant sur une section. Passez ensuite en « Doux » puis « Muet ». Le tempo indiqué par Reich est de 160 à 184 à la noire.</p>
+      <p>Les points sous les cercles indiquent chaque frappe : vert pour juste (±35 ms), jaune pour approximatif, rouge pour raté. Si vous êtes toujours « en retard », lancez la calibration.</p>
+    </div>
+  </details>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var P = [1,1,1,0,1,1,0,1,0,1,1,0];
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ---------- settings ----------
+  var S = { bpm: 120, part: 2, mine: "soft", reps: 8, start: 0, loop: false, countIn: true, latency: 0 };
+  try { var saved = JSON.parse(localStorage.getItem("clapping-settings") || "null"); if (saved) for (var k in saved) if (k in S) S[k] = saved[k]; } catch (e) {}
+  function save() { try { localStorage.setItem("clapping-settings", JSON.stringify(S)); } catch (e) {} }
+
+  var startSel = $("startSec");
+  for (var s = 0; s <= 12; s++) {
+    var o = document.createElement("option");
+    o.value = s; o.textContent = "Section " + (s + 1) + (s === 0 ? " · unisson" : s === 12 ? " · retour à l'unisson" : " · décalage " + s);
+    startSel.appendChild(o);
+  }
+
+  function applyToForm() {
+    $("tempo").value = S.bpm; $("tempoOut").textContent = S.bpm;
+    $("part" + S.part).checked = true;
+    $({ normal: "mineNormal", soft: "mineSoft", mute: "mineMute" }[S.mine]).checked = true;
+    $("reps").value = S.reps; $("repTot").textContent = S.reps;
+    startSel.value = S.start;
+    $("loop").checked = S.loop; $("countIn").checked = S.countIn;
+    $("latency").value = S.latency; $("latOut").textContent = S.latency + " ms";
+    document.documentElement.style.setProperty("--accent-mine", S.part === 1 ? "var(--p1)" : "var(--p2)");
+    document.documentElement.style.setProperty("--on-mine", S.part === 1 ? "var(--on-p1)" : "var(--on-p2)");
+    $("row1").classList.toggle("mine", S.part === 1);
+    $("row2").classList.toggle("mine", S.part === 2);
+  }
+
+  $("tempo").addEventListener("input", function (e) { S.bpm = +e.target.value; $("tempoOut").textContent = S.bpm; save(); });
+  document.querySelectorAll("input[name=part]").forEach(function (r) { r.addEventListener("change", function () { if (run) stop(); S.part = +r.value; applyToForm(); save(); }); });
+  document.querySelectorAll("input[name=mine]").forEach(function (r) { r.addEventListener("change", function () { S.mine = r.value; save(); }); });
+  $("reps").addEventListener("change", function (e) { S.reps = +e.target.value; $("repTot").textContent = S.reps; save(); });
+  startSel.addEventListener("change", function (e) { S.start = +e.target.value; if (!run) drawSection(S.start); save(); });
+  $("loop").addEventListener("change", function (e) { S.loop = e.target.checked; save(); });
+  $("countIn").addEventListener("change", function (e) { S.countIn = e.target.checked; save(); });
+  $("latency").addEventListener("input", function (e) { S.latency = +e.target.value; $("latOut").textContent = S.latency + " ms"; save(); });
+
+  // ---------- score drawing ----------
+  var c1 = $("cells1"), c2 = $("cells2"), secBar = $("sections");
+  for (var i = 0; i < 12; i++) { c1.appendChild(document.createElement("span")); c2.appendChild(document.createElement("span")); }
+  for (i = 0; i < 13; i++) secBar.appendChild(document.createElement("i"));
+  var mineCells = function () { return (S.part === 1 ? c1 : c2).children; };
+
+  function drawSection(sec) {
+    for (var i = 0; i < 12; i++) {
+      c1.children[i].className = P[i] ? "on" : "";
+      c2.children[i].className = P[(i + sec) % 12] ? "on" : "";
+    }
+    for (i = 0; i < 13; i++) secBar.children[i].className = i < sec ? "done" : i === sec ? "cur" : "";
+    $("secNum").textContent = sec + 1;
+  }
+  function clearMarks() {
+    var cells = mineCells();
+    for (var i = 0; i < 12; i++) cells[i].classList.remove("hit-good", "hit-ok", "miss");
+  }
+  var lastNow = -1;
+  function setNow(beat) {
+    if (lastNow >= 0) { c1.children[lastNow].classList.remove("now"); c2.children[lastNow].classList.remove("now"); }
+    lastNow = beat;
+    if (beat >= 0) { c1.children[beat].classList.add("now"); c2.children[beat].classList.add("now"); }
+  }
+
+  // ---------- audio ----------
+  var ctx = null, master = null, noise = null;
+  function initAudio() {
+    if (ctx) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    ctx = new AC({ latencyHint: "interactive" });
+    master = ctx.createGain(); master.gain.value = 0.9;
+    var comp = ctx.createDynamicsCompressor();
+    master.connect(comp); comp.connect(ctx.destination);
+    noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    var d = noise.getChannelData(0);
+    for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function clap(t, freq, pan, vol) {
+    if (vol <= 0) return;
+    var src = ctx.createBufferSource(); src.buffer = noise;
+    var bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = freq; bp.Q.value = 1.1;
+    var g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    [0, 0.009, 0.018].forEach(function (o) {
+      g.gain.setValueAtTime(vol, t + o);
+      g.gain.exponentialRampToValueAtTime(vol * 0.2, t + o + 0.008);
+    });
+    g.gain.setValueAtTime(vol * 0.85, t + 0.027);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
+    src.connect(bp); bp.connect(g);
+    if (ctx.createStereoPanner) { var p = ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(master); }
+    else g.connect(master);
+    src.start(t, Math.random() * 0.7, 0.2);
+  }
+  function click(t, accent) {
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = accent ? 1760 : 1175;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(accent ? 0.6 : 0.35, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.06);
+  }
+
+  // ---------- engine ----------
+  var run = null, timer = null, raf = 0, wakeLock = null;
+  var stepDur = function () { return 60 / S.bpm / 2; };
+  var win = function () { return Math.min(0.45 * stepDur(), 0.13); };
+
+  function newStats() { var a = []; for (var i = 0; i < 13; i++) a.push({ hit: 0, miss: 0, extra: 0, err: 0, abs: 0, good: 0 }); return a; }
+
+  function stepInfo(n) {
+    if (n < 0) return { countIn: true, beat: n + 12 };
+    var bar = Math.floor(n / 12), beat = n % 12, rep = bar % S.reps;
+    var section = run.loop ? run.start : run.start + Math.floor(bar / S.reps);
+    if (section > 12) return null;
+    return { beat: beat, section: section, rep: rep, bar: bar };
+  }
+
+  function schedule() {
+    while (!run.ended && run.next < ctx.currentTime + 0.12) {
+      var info = stepInfo(run.n), t = run.next;
+      if (!info) { run.ended = true; run.endTime = t; break; }
+      info.t = t;
+      if (info.countIn) { if (info.beat % 2 === 0) click(t, info.beat === 0); }
+      else {
+        var a = P[info.beat], b = P[(info.beat + info.section) % 12];
+        var vm = run.listen ? 1 : { normal: 1, soft: 0.28, mute: 0 }[S.mine];
+        if (a) clap(t, 1050, -0.45, 0.9 * (S.part === 1 ? vm : 1));
+        if (b) clap(t, 1850, 0.45, 0.9 * (S.part === 2 ? vm : 1));
+        if (!run.listen && (S.part === 1 ? a : b)) run.expected.push({ t: t, beat: info.beat, section: info.section, bar: info.bar, done: false });
+        if (run.firstNote === null) run.firstNote = t;
+      }
+      run.queue.push(info);
+      run.n++; run.next += stepDur();
+    }
+  }
+
+  function start(listen) {
+    initAudio();
+    if (ctx.resume) ctx.resume();
+    if (run) stop();
+    if (cal) stopCal();
+    S.start = +startSel.value;
+    run = {
+      listen: !!listen, start: S.start, loop: S.loop,
+      n: S.countIn ? -12 : 0, next: ctx.currentTime + 0.15, queue: [], expected: [],
+      stats: newStats(), firstNote: null, ended: false, endTime: 0, curBar: -99
+    };
+    drawSection(run.start); clearMarks(); setNow(-1);
+    $("startBtn").textContent = "Arrêter"; $("listenBtn").textContent = listen ? "Arrêter" : "Écouter";
+    $("padHint").textContent = listen ? "écoute des deux parties" : "tapez la partie " + S.part;
+    $("fb").textContent = S.countIn ? "décompte…" : "";
+    $("resultsBox").hidden = true;
+    updateStats();
+    timer = setInterval(schedule, 25); schedule();
+    raf = requestAnimationFrame(frame);
+    if (navigator.wakeLock) navigator.wakeLock.request("screen").then(function (w) { wakeLock = w; }, function () {});
+  }
+
+  function stop() {
+    if (!run) return;
+    clearInterval(timer); cancelAnimationFrame(raf);
+    var r = run; run = null;
+    setNow(-1);
+    $("startBtn").textContent = "Démarrer"; $("listenBtn").textContent = "Écouter";
+    $("padHint").textContent = "ou barre d'espace · appuyez sur Démarrer";
+    $("shiftWarn").textContent = "";
+    $("repNum").textContent = "–";
+    if (wakeLock) { wakeLock.release().catch(function () {}); wakeLock = null; }
+    if (!r.listen) showResults(r.stats);
+  }
+
+  function frame() {
+    if (!run) return;
+    var now = ctx.currentTime, lat = S.latency / 1000, w = win();
+    while (run.queue.length && run.queue[0].t <= now) {
+      var q = run.queue.shift();
+      if (q.countIn) { setNow(-1); continue; }
+      if (q.bar !== run.curBar) {
+        run.curBar = q.bar; drawSection(q.section); clearMarks();
+        $("repNum").textContent = q.rep + 1;
+        var lastRep = !run.loop && q.rep === S.reps - 1 && q.section < 12;
+        $("shiftWarn").textContent = lastRep ? "décalage à la prochaine mesure →" : "";
+        if (q.bar === 0 && $("fb").textContent === "décompte…") $("fb").textContent = "";
+      }
+      setNow(q.beat);
+    }
+    var ex = run.expected;
+    for (var i = 0; i < ex.length; i++) {
+      var e = ex[i];
+      if (!e.done && now - lat > e.t + w) {
+        e.done = true; run.stats[e.section].miss++;
+        if (e.bar === run.curBar) mineCells()[e.beat].classList.add("miss");
+        feedback("Raté", "");
+        updateStats();
+      }
+    }
+    while (ex.length && ex[0].done && ex[0].t < now - 1) ex.shift();
+    if (run.ended && !run.queue.length && now > run.endTime + 0.4) { stop(); return; }
+    raf = requestAnimationFrame(frame);
+  }
+
+  var fbTimer = 0;
+  function feedback(txt, ms) {
+    var el = $("fb"); el.textContent = txt + (ms ? "  " + ms : "");
+    clearTimeout(fbTimer); fbTimer = setTimeout(function () { el.textContent = ""; }, 600);
+  }
+
+  function tapTime(ev) {
+    var t = ctx.currentTime;
+    if (ev && ev.timeStamp && window.performance) {
+      var lag = (performance.now() - ev.timeStamp) / 1000;
+      if (lag > 0 && lag < 0.1) t -= lag;
+    }
+    return t;
+  }
+
+  function tap(ev) {
+    var pad = $("pad");
+    pad.classList.add("flash"); setTimeout(function () { pad.classList.remove("flash"); }, 70);
+    if (cal) { calTap(tapTime(ev)); return; }
+    if (!run || run.listen) return;
+    var tt = tapTime(ev) - S.latency / 1000, w = win();
+    if (run.firstNote === null || tt < run.firstNote - w) return; // still in count-in
+    var best = null, bd = 1e9;
+    for (var i = 0; i < run.expected.length; i++) {
+      var e = run.expected[i];
+      if (e.done) continue;
+      var d = Math.abs(tt - e.t);
+      if (d <= w && d < bd) { bd = d; best = e; }
+    }
+    if (!best) {
+      var sec = run.curBar >= 0 ? currentSection() : run.start;
+      run.stats[sec].extra++;
+      feedback("En trop", "");
+      updateStats(); return;
+    }
+    best.done = true;
+    var err = tt - best.t, st = run.stats[best.section];
+    st.hit++; st.err += err; st.abs += Math.abs(err);
+    var good = Math.abs(err) < 0.035;
+    if (good) st.good++;
+    if (best.bar === run.curBar) mineCells()[best.beat].classList.add(good ? "hit-good" : "hit-ok");
+    var ms = (err >= 0 ? "+" : "−") + Math.round(Math.abs(err) * 1000) + " ms";
+    feedback(good ? "Parfait" : Math.abs(err) < 0.075 ? "Bien" : "Approx.", ms);
+    updateStats();
+  }
+  function currentSection() { return run.loop ? run.start : Math.min(12, run.start + Math.floor(run.curBar / S.reps)); }
+
+  function totals(stats) {
+    var t = { hit: 0, miss: 0, extra: 0, err: 0, abs: 0, good: 0 };
+    stats.forEach(function (s) { for (var k in t) t[k] += s[k]; });
+    return t;
+  }
+  function accOf(s) { var d = s.hit + s.miss + s.extra; return d ? s.hit / d : null; }
+  function updateStats() {
+    var t = run ? totals(run.stats) : { hit: 0, miss: 0, extra: 0, err: 0, abs: 0 };
+    var a = accOf(t);
+    $("stAcc").textContent = a === null ? "–" : Math.round(a * 100) + " %";
+    $("stCount").textContent = t.hit + " juste" + (t.hit > 1 ? "s" : "") + " · " + t.miss + " raté" + (t.miss > 1 ? "s" : "");
+    if (t.hit) {
+      var m = t.err / t.hit * 1000, ab = t.abs / t.hit * 1000;
+      $("stErr").textContent = (m >= 0 ? "+" : "−") + Math.round(Math.abs(m)) + " ms";
+      $("stErrTxt").textContent = Math.abs(m) < 8 ? "bien centré" : m > 0 ? "plutôt en retard" : "plutôt en avance";
+      $("stAbs").textContent = Math.round(ab) + " ms";
+    } else { $("stErr").textContent = "–"; $("stErrTxt").textContent = "avance / retard"; $("stAbs").textContent = "–"; }
+  }
+
+  function showResults(stats) {
+    var t = totals(stats);
+    if (!t.hit && !t.miss && !t.extra) return;
+    var bars = $("bars"), labels = $("barlabels");
+    bars.innerHTML = ""; labels.innerHTML = "";
+    stats.forEach(function (s, i) {
+      var a = accOf(s), d = document.createElement("div");
+      if (a === null) { d.className = "empty"; d.style.height = "2px"; }
+      else { d.style.height = Math.max(4, a * 100) + "%"; d.className = a < 0.6 ? "low" : a < 0.85 ? "mid" : "high"; d.title = "Section " + (i + 1) + " : " + Math.round(a * 100) + " %"; }
+      bars.appendChild(d);
+      var l = document.createElement("span"); l.textContent = i + 1; labels.appendChild(l);
+    });
+    var worst = null;
+    stats.forEach(function (s, i) { var a = accOf(s); if (a !== null && (worst === null || a < accOf(stats[worst]))) worst = i; });
+    var a = accOf(t);
+    $("summary").textContent = "Précision globale " + Math.round(a * 100) + " % (" + t.hit + " justes dont " + t.good + " parfaites, " + t.miss + " ratées, " + t.extra + " en trop)." +
+      (worst !== null && accOf(stats[worst]) < 0.95 ? " Section la plus difficile : " + (worst + 1) + ". Bouclez dessus pour la travailler." : "");
+    $("resultsBox").hidden = false; $("resultsBox").open = true;
+  }
+
+  // ---------- latency calibration ----------
+  var cal = null;
+  function startCal() {
+    initAudio(); if (ctx.resume) ctx.resume();
+    if (run) stop();
+    var t0 = ctx.currentTime + 0.3, per = 0.5, clicks = [];
+    for (var i = 0; i < 16; i++) { click(t0 + i * per, i % 4 === 0); clicks.push(t0 + i * per); }
+    cal = { clicks: clicks, offs: [], end: t0 + 16 * per };
+    $("calBtn").textContent = "Annuler";
+    $("calTxt").textContent = "Tapez le pad sur chaque clic, à partir du 5e…";
+    cal.timer = setTimeout(finishCal, (cal.end - ctx.currentTime + 0.4) * 1000);
+  }
+  function calTap(t) {
+    var c = cal.clicks, best = 0, bd = 9;
+    for (var i = 0; i < c.length; i++) { var d = Math.abs(t - c[i]); if (d < bd) { bd = d; best = i; } }
+    if (best >= 4 && bd < 0.35) cal.offs.push(t - c[best]);
+  }
+  function finishCal() {
+    var o = cal.offs.slice().sort(function (a, b) { return a - b; });
+    stopCal();
+    if (o.length < 5) { $("calTxt").textContent = "Pas assez de frappes (" + o.length + "). Réessayez."; return; }
+    var med = o[Math.floor(o.length / 2)];
+    S.latency = Math.max(0, Math.min(400, Math.round(med * 1000 / 5) * 5));
+    applyToForm(); save();
+    $("calTxt").textContent = "Délai mesuré : " + S.latency + " ms sur " + o.length + " frappes.";
+  }
+  function stopCal() { if (!cal) return; clearTimeout(cal.timer); cal = null; $("calBtn").textContent = "Calibrer"; }
+  $("calBtn").addEventListener("click", function () {
+    if (cal) { stopCal(); $("calTxt").textContent = "Calibration annulée."; } else startCal();
+  });
+
+  // ---------- input ----------
+  $("startBtn").addEventListener("click", function () { if (run) stop(); else start(false); });
+  $("listenBtn").addEventListener("click", function () { if (run) stop(); else start(true); });
+  $("pad").addEventListener("pointerdown", function (e) { e.preventDefault(); tap(e); });
+  $("pad").addEventListener("keydown", function (e) { if (e.key === " " || e.key === "Enter") e.preventDefault(); });
+  $("pad").addEventListener("click", function (e) { e.preventDefault(); });
+  document.addEventListener("keydown", function (e) {
+    if (e.repeat) return;
+    var tag = e.target && e.target.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+    if (e.key === " " || e.key === "j" || e.key === "f") {
+      if (tag === "BUTTON" && e.target.id !== "pad") return;
+      e.preventDefault(); tap(e);
+    }
+  });
+  document.addEventListener("visibilitychange", function () { if (document.hidden) { stop(); stopCal(); } });
+
+  applyToForm(); drawSection(S.start); updateStats();
+
+  if ("serviceWorker" in navigator && location.protocol === "https:") {
+    try { navigator.serviceWorker.register("sw.js").catch(function () {}); } catch (e) {}
+  }
+})();
+</script>
+</body>
+</html>
