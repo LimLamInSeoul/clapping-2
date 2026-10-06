@@ -98,11 +98,12 @@ h1 { font: 800 1.9rem/1 var(--display); margin: 0; letter-spacing: -0.02em; text
   box-shadow: inset 0 -6px 0 rgba(0,0,0,0.12);
 }
 .pad:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+.pad.beat { box-shadow: inset 0 0 0 8px var(--ink); }
 .pad.flash { background: var(--ink); color: var(--bg); }
 .tip { display: flex; gap: 10px; align-items: center; justify-content: space-between; background: var(--surface); border: 1px solid var(--p2); border-radius: 12px; padding: 10px 12px; font-size: 0.9rem; }
 .tip button { font: 700 0.9rem var(--body); padding: 8px 12px; border-radius: 10px; border: 0; background: var(--p2); color: var(--on-p2); cursor: pointer; flex: none; }
 .pad .fb { position: absolute; top: 14px; left: 0; right: 0; text-align: center; font: 500 1rem var(--mono); opacity: 0.95; }
-.pad .hint { font: 400 0.85rem var(--body); letter-spacing: 0; opacity: 0.85; display: block; margin-top: 6px; }
+.pad .hint { font: 400 0.9rem var(--body); letter-spacing: 0; opacity: 0.9; display: block; margin: 6px auto 0; max-width: 22rem; padding-inline: 12px; }
 
 .controls { display: flex; gap: 10px; }
 button.main, button.sec {
@@ -171,7 +172,7 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
 
   <button class="pad" id="pad" type="button" aria-label="Taper le rythme">
     <span class="fb" id="fb"></span>
-    <span>TAPEZ ICI<span class="hint" id="padHint">ou barre d'espace · appuyez sur Démarrer</span></span>
+    <span><span id="padMain">TAPEZ ICI</span><span class="hint" id="padHint">ou barre d'espace · appuyez sur Démarrer</span></span>
   </button>
 
   <div class="tip" id="calTip" hidden><span>Sur téléphone, le son sort avec un peu de retard. Calibrez une fois pour que vos frappes soient bien comptées.</span><button type="button" id="calTipBtn">Calibrer</button></div>
@@ -398,7 +399,7 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
     };
     drawSection(run.start); clearMarks(); setNow(-1);
     $("startBtn").textContent = "Arrêter"; $("listenBtn").textContent = listen ? "Arrêter" : "Écouter";
-    $("padHint").textContent = listen ? "écoute des deux parties" : "tapez la partie " + S.part;
+    padText("TAPEZ ICI", listen ? "écoute des deux parties" : "tapez la partie " + S.part);
     $("fb").textContent = S.countIn ? "décompte…" : "";
     $("resultsBox").hidden = true;
     updateStats();
@@ -413,7 +414,7 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
     var r = run; run = null;
     setNow(-1);
     $("startBtn").textContent = "Démarrer"; $("listenBtn").textContent = "Écouter";
-    $("padHint").textContent = "ou barre d'espace · appuyez sur Démarrer";
+    idlePad();
     $("shiftWarn").textContent = "";
     $("repNum").textContent = "–";
     if (wakeLock) { wakeLock.release().catch(function () {}); wakeLock = null; }
@@ -539,38 +540,73 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
   }
 
   // ---------- latency calibration ----------
-  var cal = null;
+  // 16 clicks, one every half second. The first 4 are for listening; taps on the
+  // next 12 are matched to their click and the median gap becomes the compensation.
+  var cal = null, CAL_N = 16, CAL_WARM = 4;
+  function padText(main, hint) { $("padMain").textContent = main; $("padHint").textContent = hint; }
+  function idlePad() { padText("TAPEZ ICI", "ou barre d'espace · appuyez sur Démarrer"); }
   function startCal() {
     initAudio(); if (ctx.resume) ctx.resume();
     if (run) stop();
-    var t0 = ctx.currentTime + 0.3, per = 0.5, clicks = [];
-    for (var i = 0; i < 16; i++) { click(t0 + i * per, i % 4 === 0); clicks.push(t0 + i * per); }
-    cal = { clicks: clicks, offs: [], end: t0 + 16 * per };
+    var t0 = ctx.currentTime + 0.6, per = 0.5, clicks = [];
+    for (var i = 0; i < CAL_N; i++) { click(t0 + i * per, i < CAL_WARM); clicks.push(t0 + i * per); }
+    cal = { clicks: clicks, offs: [], end: t0 + CAL_N * per, last: -1, raf: 0 };
     $("calBtn").textContent = "Annuler";
-    $("calTxt").textContent = "Tapez le pad sur chaque clic, à partir du 5e…";
+    $("calTxt").textContent = "Calibration en cours : tapez le grand bouton orange sur chaque clic.";
+    padText("ÉCOUTEZ", "4 clics aigus pour prendre le tempo, puis tapez sur chaque clic");
+    $("pad").scrollIntoView({ block: "center", behavior: "smooth" });
     cal.timer = setTimeout(finishCal, (cal.end - ctx.currentTime + 0.4) * 1000);
+    cal.raf = requestAnimationFrame(calFrame);
+  }
+  function calFrame() {
+    if (!cal) return;
+    var heard = ctx.currentTime - autoLat(), idx = -1;
+    for (var i = 0; i < CAL_N; i++) if (heard >= cal.clicks[i]) idx = i;
+    if (idx !== cal.last && idx >= 0) {
+      cal.last = idx;
+      var pad = $("pad");
+      pad.classList.add("beat"); setTimeout(function () { pad.classList.remove("beat"); }, 90);
+      if (idx < CAL_WARM) padText("ÉCOUTEZ " + (CAL_WARM - idx - 1 || ""), "tapez dès les clics graves");
+      else calHint();
+    }
+    cal.raf = requestAnimationFrame(calFrame);
+  }
+  function calHint() {
+    var n = cal.offs.length, pl = n > 1 ? "s" : "";
+    padText("TAPEZ !", "clic " + Math.max(1, cal.last - CAL_WARM + 1) + "/" + (CAL_N - CAL_WARM) + " · " + n + " frappe" + pl + " comptée" + pl);
   }
   function calTap(t) {
     var c = cal.clicks, best = 0, bd = 9;
     for (var i = 0; i < c.length; i++) { var d = Math.abs(t - c[i]); if (d < bd) { bd = d; best = i; } }
-    if (best >= 4 && bd < 0.35) cal.offs.push(t - c[best]);
+    if (best < CAL_WARM) { feedback("Attendez les clics graves", ""); return; }
+    if (bd < 0.35) {
+      var off = t - c[best];
+      cal.offs.push(off);
+      calHint();
+      feedback("Frappe " + cal.offs.length, (off >= 0 ? "+" : "−") + Math.round(Math.abs(off) * 1000) + " ms");
+    }
   }
   function finishCal() {
     var o = cal.offs.slice().sort(function (a, b) { return a - b; });
     stopCal();
-    if (o.length < 5) { $("calTxt").textContent = "Pas assez de frappes (" + o.length + "). Réessayez."; return; }
+    if (o.length < 5) {
+      var msg = "Seulement " + o.length + " frappe" + (o.length > 1 ? "s" : "") + " comptée" + (o.length > 1 ? "s" : "") + ". Réessayez en tapant le grand bouton sur chaque clic grave.";
+      $("calTxt").textContent = msg; padText("RÉESSAYEZ", msg); return;
+    }
     var med = o[Math.floor(o.length / 2)];
     var totalMs = Math.round(med * 1000);
     S.latency = Math.max(-100, Math.min(400, Math.round((med - autoLat()) * 1000 / 5) * 5));
     S.calibrated = true;
     applyToForm(); save();
-    $("calTxt").textContent = "Délai total mesuré : " + totalMs + " ms sur " + o.length + " frappes. Il est maintenant compensé.";
+    var done = "Délai mesuré : " + totalMs + " ms (" + o.length + " frappes). C'est compensé, appuyez sur Démarrer.";
+    $("calTxt").textContent = done; padText("CALIBRÉ ✓", done);
   }
-  function stopCal() { if (!cal) return; clearTimeout(cal.timer); cal = null; $("calBtn").textContent = "Calibrer"; }
-  $("calTipBtn").addEventListener("click", function () {
-    $("settingsBox").open = true; startCal();
-    $("pad").scrollIntoView({ block: "center", behavior: "smooth" });
-  });
+  function stopCal() {
+    if (!cal) return;
+    clearTimeout(cal.timer); cancelAnimationFrame(cal.raf); cal = null;
+    $("calBtn").textContent = "Calibrer"; idlePad();
+  }
+  $("calTipBtn").addEventListener("click", function () { $("settingsBox").open = true; startCal(); });
   $("calBtn").addEventListener("click", function () {
     if (cal) { stopCal(); $("calTxt").textContent = "Calibration annulée."; } else startCal();
   });
