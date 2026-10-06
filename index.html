@@ -44,6 +44,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body {
   background: var(--bg); color: var(--ink);
@@ -97,7 +98,9 @@ h1 { font: 800 1.9rem/1 var(--display); margin: 0; letter-spacing: -0.02em; text
   box-shadow: inset 0 -6px 0 rgba(0,0,0,0.12);
 }
 .pad:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
-.pad.flash { filter: brightness(1.25); transform: scale(0.99); }
+.pad.flash { background: var(--ink); color: var(--bg); }
+.tip { display: flex; gap: 10px; align-items: center; justify-content: space-between; background: var(--surface); border: 1px solid var(--p2); border-radius: 12px; padding: 10px 12px; font-size: 0.9rem; }
+.tip button { font: 700 0.9rem var(--body); padding: 8px 12px; border-radius: 10px; border: 0; background: var(--p2); color: var(--on-p2); cursor: pointer; flex: none; }
 .pad .fb { position: absolute; top: 14px; left: 0; right: 0; text-align: center; font: 500 1rem var(--mono); opacity: 0.95; }
 .pad .hint { font: 400 0.85rem var(--body); letter-spacing: 0; opacity: 0.85; display: block; margin-top: 6px; }
 
@@ -171,6 +174,8 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
     <span>TAPEZ ICI<span class="hint" id="padHint">ou barre d'espace · appuyez sur Démarrer</span></span>
   </button>
 
+  <div class="tip" id="calTip" hidden><span>Sur téléphone, le son sort avec un peu de retard. Calibrez une fois pour que vos frappes soient bien comptées.</span><button type="button" id="calTipBtn">Calibrer</button></div>
+
   <div class="controls">
     <button class="main" id="startBtn" type="button">Démarrer</button>
     <button class="sec" id="listenBtn" type="button">Écouter</button>
@@ -214,8 +219,8 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
       <label class="check"><input type="checkbox" id="loop"> Boucler sur cette section</label>
       <label class="check"><input type="checkbox" id="countIn" checked> Décompte d'une mesure</label>
       <div class="field"><span>Compensation de latence <output id="latOut">0 ms</output></span>
-        <input type="range" id="latency" min="0" max="400" step="5" value="0">
-        <div class="cal"><button type="button" id="calBtn">Calibrer</button><span class="note" id="calTxt">Tapez sur 12 clics pour mesurer le délai audio (utile en Bluetooth).</span></div>
+        <input type="range" id="latency" min="-100" max="400" step="5" value="0">
+        <div class="cal"><button type="button" id="calBtn">Calibrer</button><span class="note" id="calTxt">Tapez en rythme sur 16 clics pour mesurer le délai entre le son et votre frappe.</span></div>
       </div>
     </div>
   </details>
@@ -237,7 +242,7 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
   var $ = function (id) { return document.getElementById(id); };
 
   // ---------- settings ----------
-  var S = { bpm: 120, part: 2, mine: "soft", reps: 8, start: 0, loop: false, countIn: true, latency: 0 };
+  var S = { bpm: 120, part: 2, mine: "soft", reps: 8, start: 0, loop: false, countIn: true, latency: 0, calibrated: false };
   try { var saved = JSON.parse(localStorage.getItem("clapping-settings") || "null"); if (saved) for (var k in saved) if (k in S) S[k] = saved[k]; } catch (e) {}
   function save() { try { localStorage.setItem("clapping-settings", JSON.stringify(S)); } catch (e) {} }
 
@@ -255,7 +260,8 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
     $("reps").value = S.reps; $("repTot").textContent = S.reps;
     startSel.value = S.start;
     $("loop").checked = S.loop; $("countIn").checked = S.countIn;
-    $("latency").value = S.latency; $("latOut").textContent = S.latency + " ms";
+    $("latency").value = S.latency; $("latOut").textContent = latLabel();
+    $("calTip").hidden = S.calibrated;
     document.documentElement.style.setProperty("--accent-mine", S.part === 1 ? "var(--p1)" : "var(--p2)");
     document.documentElement.style.setProperty("--on-mine", S.part === 1 ? "var(--on-p1)" : "var(--on-p2)");
     $("row1").classList.toggle("mine", S.part === 1);
@@ -269,7 +275,15 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
   startSel.addEventListener("change", function (e) { S.start = +e.target.value; if (!run) drawSection(S.start); save(); });
   $("loop").addEventListener("change", function (e) { S.loop = e.target.checked; save(); });
   $("countIn").addEventListener("change", function (e) { S.countIn = e.target.checked; save(); });
-  $("latency").addEventListener("input", function (e) { S.latency = +e.target.value; $("latOut").textContent = S.latency + " ms"; save(); });
+  $("latency").addEventListener("input", function (e) { S.latency = +e.target.value; $("latOut").textContent = latLabel(); save(); });
+  // Total delay between a scheduled note and the tap that matches it:
+  // the audio output latency the browser reports, plus the measured/manual part (touchscreen, speaker).
+  function autoLat() { return ctx ? Math.max(0, (ctx.outputLatency || 0) + (ctx.baseLatency || 0)) : 0; }
+  function totalLat() { return autoLat() + S.latency / 1000; }
+  function latLabel() {
+    var a = Math.round(autoLat() * 1000), m = S.latency;
+    return ctx ? a + " ms auto " + (m >= 0 ? "+ " : "− ") + Math.abs(m) + " ms" : (m >= 0 ? "+" : "−") + Math.abs(m) + " ms";
+  }
 
   // ---------- score drawing ----------
   var c1 = $("cells1"), c2 = $("cells2"), secBar = $("sections");
@@ -308,6 +322,8 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
     noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
     var d = noise.getChannelData(0);
     for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    // outputLatency is only known once the device is actually playing.
+    setTimeout(function () { $("latOut").textContent = latLabel(); }, 600);
   }
   function clap(t, freq, pan, vol) {
     if (vol <= 0) return;
@@ -406,8 +422,9 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
 
   function frame() {
     if (!run) return;
-    var now = ctx.currentTime, lat = S.latency / 1000, w = win();
-    while (run.queue.length && run.queue[0].t <= now) {
+    // The playhead follows what is heard, so it lags the scheduled time by the output latency.
+    var now = ctx.currentTime, lat = totalLat(), w = win(), heard = now - autoLat();
+    while (run.queue.length && run.queue[0].t <= heard) {
       var q = run.queue.shift();
       if (q.countIn) { setNow(-1); continue; }
       if (q.bar !== run.curBar) {
@@ -449,12 +466,13 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
     return t;
   }
 
+  var flashTimer = 0;
   function tap(ev) {
     var pad = $("pad");
-    pad.classList.add("flash"); setTimeout(function () { pad.classList.remove("flash"); }, 70);
+    pad.classList.add("flash"); clearTimeout(flashTimer); flashTimer = setTimeout(function () { pad.classList.remove("flash"); }, 110);
     if (cal) { calTap(tapTime(ev)); return; }
     if (!run || run.listen) return;
-    var tt = tapTime(ev) - S.latency / 1000, w = win();
+    var tt = tapTime(ev) - totalLat(), w = win();
     if (run.firstNote === null || tt < run.firstNote - w) return; // still in count-in
     var best = null, bd = 1e9;
     for (var i = 0; i < run.expected.length; i++) {
@@ -542,11 +560,17 @@ select { font: 1rem var(--body); padding: 10px; border-radius: 10px; border: 1px
     stopCal();
     if (o.length < 5) { $("calTxt").textContent = "Pas assez de frappes (" + o.length + "). Réessayez."; return; }
     var med = o[Math.floor(o.length / 2)];
-    S.latency = Math.max(0, Math.min(400, Math.round(med * 1000 / 5) * 5));
+    var totalMs = Math.round(med * 1000);
+    S.latency = Math.max(-100, Math.min(400, Math.round((med - autoLat()) * 1000 / 5) * 5));
+    S.calibrated = true;
     applyToForm(); save();
-    $("calTxt").textContent = "Délai mesuré : " + S.latency + " ms sur " + o.length + " frappes.";
+    $("calTxt").textContent = "Délai total mesuré : " + totalMs + " ms sur " + o.length + " frappes. Il est maintenant compensé.";
   }
   function stopCal() { if (!cal) return; clearTimeout(cal.timer); cal = null; $("calBtn").textContent = "Calibrer"; }
+  $("calTipBtn").addEventListener("click", function () {
+    $("settingsBox").open = true; startCal();
+    $("pad").scrollIntoView({ block: "center", behavior: "smooth" });
+  });
   $("calBtn").addEventListener("click", function () {
     if (cal) { stopCal(); $("calTxt").textContent = "Calibration annulée."; } else startCal();
   });
